@@ -1,3 +1,4 @@
+import 'package:eduride/Admin/amdinlogin/login.dart';
 import 'package:eduride/UserScreen/LoginScreen/login.dart';
 import 'package:flutter/material.dart';
 
@@ -78,6 +79,34 @@ class _FirstscreenState extends State<Firstscreen> {
               ),
             ),
           ),
+          PopupMenuButton<String>(
+            icon: const Icon(
+              Icons.more_vert,
+              color: Colors.white,
+            ),
+            onSelected: (value) {
+              if (value == "admin") {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const Adminlogin(),
+                  ),
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem<String>(
+                value: "admin",
+                child: Row(
+                  children: [
+                    Icon(Icons.admin_panel_settings),
+                    SizedBox(width: 10),
+                    Text("Admin Login"),
+                  ],
+                ),
+              ),
+            ],
+          )
         ],
       ),
     );
