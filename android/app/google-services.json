@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "41467456582",
+    "project_id": "eduride-cd9f2",
+    "storage_bucket": "eduride-cd9f2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:41467456582:android:1819883171ecc0d7ceae47",
+        "android_client_info": {
+          "package_name": "com.example.eduride"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3HwODiPQeQGFwXtz3rYQeRKyTzqGsNfI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
