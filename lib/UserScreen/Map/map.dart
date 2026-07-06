@@ -33,7 +33,6 @@ class _MapPageState extends State<MapPage> {
 
   List<LatLng> routePoints = [];
 
-  // For polygon drawing (multiple points)
   List<LatLng> polygonPoints = [];
   bool isDrawingPolygon = false;
 
@@ -43,7 +42,6 @@ class _MapPageState extends State<MapPage> {
   final TextEditingController fromController = TextEditingController();
   final TextEditingController toController = TextEditingController();
 
-  // Add these variables for ride booking
   bool _isBookingRide = false;
   String? _selectedRideType;
   final List<String> _rideTypes = ['Standard', 'Premium', 'Shared'];
@@ -171,25 +169,20 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // Method to handle map tap for selecting destination
   void _onMapTap(TapPosition tapPosition, LatLng point) {
     setState(() {
       destinationLocation = point;
-      // Clear previous route and polygon points
       routePoints.clear();
       polygonPoints.clear();
       isDrawingPolygon = false;
-      _selectedRideType = null; // Reset ride type selection
+      _selectedRideType = null;
 
-      // Get address for the tapped location
       _getAddressFromCoordinates(point);
 
-      // Move map to the selected location
       _mapController.move(point, 15);
     });
   }
 
-  // Method to get address from coordinates
   Future<void> _getAddressFromCoordinates(LatLng point) async {
     try {
       List<Placemark> place = await placemarkFromCoordinates(
@@ -200,10 +193,8 @@ class _MapPageState extends State<MapPage> {
       toController.text =
       "${place.first.street}, ${place.first.locality}";
 
-      // Automatically get route to the selected location
       await getRoute(_currentLocation, point);
 
-      // Calculate fare after getting route
       _calculateFare();
     } catch (e) {
       toController.text = "Selected Location";
@@ -212,7 +203,6 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // Calculate fare based on distance
   void _calculateFare() {
     if (routePoints.length < 2) return;
 
@@ -239,7 +229,6 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // Calculate distance between two points in km
   double _calculateDistance(LatLng p1, LatLng p2) {
     const double earthRadius = 6371; // km
 
@@ -262,18 +251,15 @@ class _MapPageState extends State<MapPage> {
     return deg * math.pi / 180;
   }
 
-  // Method to toggle polygon drawing mode
   void _togglePolygonMode() {
     setState(() {
       isDrawingPolygon = !isDrawingPolygon;
       if (!isDrawingPolygon && polygonPoints.isNotEmpty) {
-        // Close the polygon by adding the first point at the end
         polygonPoints.add(polygonPoints.first);
       }
     });
   }
 
-  // Method to add points to polygon when map is tapped in polygon mode
   void _addPolygonPoint(TapPosition tapPosition, LatLng point) {
     if (isDrawingPolygon) {
       setState(() {
@@ -288,7 +274,6 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // Method to clear polygon
   void _clearPolygon() {
     setState(() {
       polygonPoints.clear();
@@ -342,7 +327,6 @@ class _MapPageState extends State<MapPage> {
 
     destinationLocation = LatLng(lat, lon);
 
-    // Clear polygon points when searching
     polygonPoints.clear();
     isDrawingPolygon = false;
 
@@ -418,7 +402,7 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // NEW METHOD: Navigate to payment page
+  // ================= UPDATED METHOD =================
   void _bookRideAndNavigateToPayment() {
     if (destinationLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -440,7 +424,6 @@ class _MapPageState extends State<MapPage> {
       return;
     }
 
-    // Show ride type selection dialog
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -465,15 +448,16 @@ class _MapPageState extends State<MapPage> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // Ride type options
                   ..._rideTypes.map((type) {
+                    double typeFare = rideFare;
+                    if (type == 'Premium') {
+                      typeFare = rideFare * 1.5;
+                    } else if (type == 'Shared') {
+                      typeFare = rideFare * 0.7;
+                    }
                     return RadioListTile<String>(
                       title: Text(type),
-                      subtitle: Text(
-                        type == 'Standard' ? '₹${(rideFare).toStringAsFixed(0)}' :
-                        type == 'Premium' ? '₹${(rideFare * 1.5).toStringAsFixed(0)}' :
-                        '₹${(rideFare * 0.7).toStringAsFixed(0)}',
-                      ),
+                      subtitle: Text('₹${typeFare.toStringAsFixed(0)}'),
                       value: type,
                       groupValue: _selectedRideType,
                       onChanged: (value) {
@@ -531,18 +515,29 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  // NEW METHOD: Navigate to payment page
+  // ================= UPDATED NAVIGATION =================
   void _navigateToPayment() {
-    // You can pass ride details to the payment page
+    // Calculate final fare based on selected ride type
+    double finalFare = rideFare; // Standard
+    if (_selectedRideType == 'Premium') {
+      finalFare = rideFare * 1.5;
+    } else if (_selectedRideType == 'Shared') {
+      finalFare = rideFare * 0.7;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const PaymentPage(),
+        builder: (context) => PaymentPage(
+          amount: finalFare,
+          rideType: _selectedRideType ?? 'Standard',
+          fromLocation: fromController.text,
+          toLocation: toController.text,
+          distance: rideDistance,
+        ),
       ),
     ).then((result) {
-      // Handle the result if needed (e.g., after payment is complete)
       if (result == true) {
-        // Payment successful - show confirmation
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("🎉 Ride booked successfully!"),
@@ -550,7 +545,6 @@ class _MapPageState extends State<MapPage> {
             duration: Duration(seconds: 3),
           ),
         );
-        // Reset the map state
         setState(() {
           destinationLocation = null;
           routePoints.clear();
@@ -559,17 +553,14 @@ class _MapPageState extends State<MapPage> {
           rideFare = 0;
           rideDistance = 0;
         });
-        // Reset map view to current location
         _mapController.move(_currentLocation, 16);
       }
     });
   }
 
-  // Helper method to build markers
   List<Marker> _buildMarkers() {
     List<Marker> markers = [];
 
-    // Current location marker
     markers.add(
       Marker(
         point: _currentLocation,
@@ -583,7 +574,6 @@ class _MapPageState extends State<MapPage> {
       ),
     );
 
-    // Destination marker
     if (destinationLocation != null) {
       markers.add(
         Marker(
@@ -599,7 +589,6 @@ class _MapPageState extends State<MapPage> {
       );
     }
 
-    // Polygon point markers
     for (int i = 0; i < polygonPoints.length; i++) {
       final point = polygonPoints[i];
       markers.add(
@@ -644,7 +633,6 @@ class _MapPageState extends State<MapPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Build children list dynamically with explicit type
     final List<Widget> mapChildren = <Widget>[
       TileLayer(
         urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -652,7 +640,6 @@ class _MapPageState extends State<MapPage> {
       ),
     ];
 
-    // Add polyline layer - using a separate variable and explicit check
     final bool hasRoute = routePoints.isNotEmpty;
     if (hasRoute) {
       mapChildren.add(
@@ -668,7 +655,6 @@ class _MapPageState extends State<MapPage> {
       );
     }
 
-    // Add polygon layer - only if we have at least 3 points
     final bool hasValidPolygon = polygonPoints.length >= 3;
     if (hasValidPolygon) {
       mapChildren.add(
@@ -685,7 +671,6 @@ class _MapPageState extends State<MapPage> {
       );
     }
 
-    // Add marker layer
     mapChildren.add(
       MarkerLayer(
         markers: _buildMarkers(),
@@ -745,18 +730,15 @@ class _MapPageState extends State<MapPage> {
                     initialCenter: _currentLocation,
                     initialZoom: 16,
                     onTap: (tapPosition, point) {
-                      // If in polygon mode, add polygon point
                       if (isDrawingPolygon) {
                         _addPolygonPoint(tapPosition, point);
                       } else {
-                        // Otherwise select destination
                         _onMapTap(tapPosition, point);
                       }
                     },
                   ),
                   children: mapChildren,
                 ),
-                // Floating info button
                 if (isDrawingPolygon)
                   Positioned(
                     top: 10,
@@ -780,7 +762,6 @@ class _MapPageState extends State<MapPage> {
                       ),
                     ),
                   ),
-                // Polygon info
                 if (polygonPoints.isNotEmpty && !isDrawingPolygon && polygonPoints.length >= 3)
                   Positioned(
                     bottom: 20,
@@ -823,7 +804,6 @@ class _MapPageState extends State<MapPage> {
                       ),
                     ),
                   ),
-                // NEW: Ride info overlay when route is found
                 if (routePoints.isNotEmpty && destinationLocation != null)
                   Positioned(
                     bottom: 10,

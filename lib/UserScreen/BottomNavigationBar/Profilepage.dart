@@ -1,3 +1,4 @@
+import 'package:eduride/UserScreen/BottomNavigationBar/Message.dart';
 import 'package:eduride/UserScreen/FirstScreen/firstscreen.dart';
 import 'package:eduride/UserScreen/LoginScreen/login.dart';
 import 'package:eduride/UserScreen/Profile/About/about.dart';
@@ -77,7 +78,9 @@ class ProfilePage extends StatelessWidget {
             profileTile(
               Icons.payment,
               "Payments",
-                  () {},
+                  () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) =>MessagePage()));
+                  },
             ),
 
             profileTile(
