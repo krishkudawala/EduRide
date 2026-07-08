@@ -38,13 +38,11 @@ class _LoginState extends State<Login> {
         password: password.text.trim(),
       );
 
-      Navigator.pushReplacement(
+      Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(
-          builder: (context) => const Home(),
-        ),
-      );
-    } on FirebaseAuthException catch (e) {
+        MaterialPageRoute(builder: (context) => const Home()),
+            (Route<dynamic> route) => false, // removes all previous routes
+      );    } on FirebaseAuthException catch (e) {
       String message;
 
       switch (e.code) {

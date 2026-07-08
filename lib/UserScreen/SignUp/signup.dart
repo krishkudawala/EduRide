@@ -28,7 +28,11 @@ bool loading=false;
     try{
       auth.createUserWithEmailAndPassword(
           email: email.text, password: password.text);
-      Navigator.push(context, MaterialPageRoute(builder: (context) =>Home()));
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const Home()),
+            (Route<dynamic> route) => false, // removes all previous routes
+      );
     }catch (e){
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(e.toString()

@@ -32,37 +32,6 @@ class ProfilePage extends StatelessWidget {
       body: SingleChildScrollView(
         child: Column(
           children: [
-
-            const SizedBox(height: 20),
-
-            // Profile Image
-            const CircleAvatar(
-              radius: 55,
-              backgroundImage: AssetImage(
-                "assects/logo/profile.jpg",
-              ),
-            ),
-
-            const SizedBox(height: 15),
-
-            const Text(
-              "Krish Kudawala",
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(height: 5),
-
-            Text(
-              "krish@gmail.com",
-              style: TextStyle(
-                color: Colors.grey.shade700,
-                fontSize: 16,
-              ),
-            ),
-
             const SizedBox(height: 30),
 
             profileTile(
