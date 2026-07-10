@@ -23,6 +23,7 @@ class _MapPageState extends State<MapPage> {
   double rideFare = 0;
 
   LatLng _currentLocation = const LatLng(30.3782, 76.7767);
+  LatLng _pickupLocation = const LatLng(30.3782, 76.7767); // NEW: user can change this
   bool _loading = true;
   StreamSubscription<Position>? _positionSubscription;
   LatLng? destinationLocation;
@@ -36,11 +37,9 @@ class _MapPageState extends State<MapPage> {
   final TextEditingController fromController = TextEditingController();
   final TextEditingController toController = TextEditingController();
 
-  bool _isBookingRide = false;
   String? _selectedRideType;
   final List<String> _rideTypes = ['Standard', 'Premium', 'Shared'];
 
-  // Saved locations (shared with home)
   final List<String> _savedLocations = ['Home', 'Work', 'School', 'Gym'];
 
   @override
@@ -51,11 +50,12 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
+  // -------------------- LOCATION / PERMISSIONS --------------------
   Future<void> getCurrentAddress() async {
     try {
       List<Placemark> place = await placemarkFromCoordinates(
-        _currentLocation.latitude,
-        _currentLocation.longitude,
+        _pickupLocation.latitude,
+        _pickupLocation.longitude,
       );
       fromController.text =
       "${place.first.street}, ${place.first.locality}";
@@ -100,6 +100,7 @@ class _MapPageState extends State<MapPage> {
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
     _currentLocation = LatLng(position.latitude, position.longitude);
+    _pickupLocation = _currentLocation; // set pickup to current
     await getCurrentAddress();
 
     if (mounted) {
@@ -117,12 +118,18 @@ class _MapPageState extends State<MapPage> {
       ),
     ).listen((Position position) {
       _currentLocation = LatLng(position.latitude, position.longitude);
+      // Only update pickup if user hasn't manually changed it? Let's update always but we can allow override.
+      // We'll update _pickupLocation only if the user hasn't manually changed it via search.
+      // For simplicity, we'll update _pickupLocation to current only if it's still equal to old current.
+      // Actually, we can have a flag, but I'll update but if user has manually set, they'd want to keep it.
+      // Safer: don't auto-update pickup. The user can reset manually.
       if (!mounted) return;
       setState(() {});
       _mapController.move(_currentLocation, _mapController.camera.zoom);
     });
   }
 
+  // -------------------- MAP TAP / DESTINATION --------------------
   void _onMapTap(TapPosition tapPosition, LatLng point) {
     setState(() {
       destinationLocation = point;
@@ -142,21 +149,21 @@ class _MapPageState extends State<MapPage> {
         point.longitude,
       );
       toController.text = "${place.first.street}, ${place.first.locality}";
-      await getRoute(_currentLocation, point);
+      await getRoute(_pickupLocation, point); // use pickup as start
       _calculateFare();
     } catch (e) {
       toController.text = "Selected Location";
-      await getRoute(_currentLocation, point);
+      await getRoute(_pickupLocation, point);
       _calculateFare();
     }
   }
 
+  // -------------------- FARE CALCULATION --------------------
   void _calculateFare() {
     if (routePoints.length < 2 && rideDistance == 0) {
-      // Handle zero‑distance route (same location)
       setState(() {
         rideDistance = 0;
-        rideFare = 20; // base fare only
+        rideFare = 20;
       });
       return;
     }
@@ -165,7 +172,7 @@ class _MapPageState extends State<MapPage> {
     for (int i = 0; i < routePoints.length - 1; i++) {
       distanceInKm += _calculateDistance(routePoints[i], routePoints[i + 1]);
     }
-    double fare = 20; // Base fare
+    double fare = 20;
     if (distanceInKm <= 5) {
       fare += distanceInKm * 10;
     } else {
@@ -192,6 +199,7 @@ class _MapPageState extends State<MapPage> {
 
   double _degToRad(double deg) => deg * math.pi / 180;
 
+  // -------------------- POLYGON --------------------
   void _togglePolygonMode() {
     setState(() {
       isDrawingPolygon = !isDrawingPolygon;
@@ -217,51 +225,276 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // ---- SEARCH (via Nominatim) ----
-  Future<void> searchPlace() async {
-    if (toController.text.trim().isEmpty) {
+  // -------------------- SEARCH PICKUP (FROM) --------------------
+  Future<void> searchPickup() async {
+    final query = fromController.text.trim();
+    if (query.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter pickup location")),
+      );
+      return;
+    }
+
+    final url = Uri.parse(
+      "https://nominatim.openstreetmap.org/search?"
+          "q=${Uri.encodeComponent(query)}"
+          "&format=json"
+          "&limit=5"
+          "&countrycodes=in"
+          "&viewbox=${_currentLocation.longitude - 0.1},${_currentLocation.latitude - 0.1},${_currentLocation.longitude + 0.1},${_currentLocation.latitude + 0.1}"
+          "&bounded=1",
+    );
+
+    try {
+      final response = await http.get(url, headers: {"User-Agent": "EduRide"});
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Search failed (${response.statusCode})")),
+        );
+        return;
+      }
+
+      final data = jsonDecode(response.body);
+      if (data.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Location not found")),
+        );
+        return;
+      }
+
+      if (data.length > 1) {
+        _showPickupSelectionDialog(data);
+      } else {
+        _selectPickup(data[0]);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error searching: $e")),
+      );
+    }
+  }
+
+  void _showPickupSelectionDialog(List results) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Select pickup location'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: results.length,
+            itemBuilder: (ctx, i) {
+              final place = results[i];
+              return ListTile(
+                title: Text(place['display_name'] ?? 'Unnamed'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _selectPickup(place);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _selectPickup(Map<String, dynamic> place) {
+    final lat = double.parse(place["lat"]);
+    final lon = double.parse(place["lon"]);
+    final displayName = place['display_name'] ?? 'Selected Location';
+
+    setState(() {
+      _pickupLocation = LatLng(lat, lon);
+      fromController.text = displayName;
+    });
+
+    // If destination already set, recalculate route and fare
+    if (destinationLocation != null) {
+      getRoute(_pickupLocation, destinationLocation!).then((_) {
+        _calculateFare();
+        _mapController.move(_pickupLocation, 15);
+      });
+    } else {
+      // just move map to pickup
+      _mapController.move(_pickupLocation, 15);
+    }
+  }
+
+  // Reset pickup to current GPS location
+  void _resetPickupToCurrent() {
+    setState(() {
+      _pickupLocation = _currentLocation;
+      fromController.text = "Current Location"; // we'll update address async
+    });
+    // update address
+    getCurrentAddress();
+    // if destination set, recalc
+    if (destinationLocation != null) {
+      getRoute(_pickupLocation, destinationLocation!).then((_) {
+        _calculateFare();
+        _mapController.move(_pickupLocation, 15);
+      });
+    } else {
+      _mapController.move(_pickupLocation, 15);
+    }
+  }
+
+  // -------------------- SEARCH DESTINATION (TO) --------------------
+  Future<void> searchPlace({String? query}) async {
+    final searchQuery = query ?? toController.text.trim();
+    if (searchQuery.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter destination")),
       );
       return;
     }
+
     final url = Uri.parse(
-      "https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(toController.text.trim())}&format=json&limit=1",
+      "https://nominatim.openstreetmap.org/search?"
+          "q=${Uri.encodeComponent(searchQuery)}"
+          "&format=json"
+          "&limit=5"
+          "&countrycodes=in"
+          "&viewbox=${_currentLocation.longitude - 0.1},${_currentLocation.latitude - 0.1},${_currentLocation.longitude + 0.1},${_currentLocation.latitude + 0.1}"
+          "&bounded=1",
     );
-    final response = await http.get(url, headers: {"User-Agent": "EduRide"});
-    if (response.statusCode != 200) {
+
+    try {
+      final response = await http.get(url, headers: {"User-Agent": "EduRide"});
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Search failed (${response.statusCode})")),
+        );
+        return;
+      }
+
+      final data = jsonDecode(response.body);
+      if (data.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Location not found")),
+        );
+        return;
+      }
+
+      if (data.length > 1) {
+        _showLocationSelectionDialog(data);
+      } else {
+        _selectLocation(data[0]);
+      }
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Search failed")),
+        SnackBar(content: Text("Error searching: $e")),
       );
-      return;
     }
-    final data = jsonDecode(response.body);
-    if (data.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Location not found")),
-      );
-      return;
-    }
-    final lat = double.parse(data[0]["lat"]);
-    final lon = double.parse(data[0]["lon"]);
-    destinationLocation = LatLng(lat, lon);
-    polygonPoints.clear();
-    isDrawingPolygon = false;
-    await getRoute(_currentLocation, destinationLocation!);
-    _calculateFare();
-    setState(() {});
-    _mapController.move(destinationLocation!, 15);
   }
 
+  void _showLocationSelectionDialog(List results) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Select a location'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: results.length,
+            itemBuilder: (ctx, i) {
+              final place = results[i];
+              return ListTile(
+                title: Text(place['display_name'] ?? 'Unnamed'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _selectLocation(place);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _selectLocation(Map<String, dynamic> place) {
+    final lat = double.parse(place["lat"]);
+    final lon = double.parse(place["lon"]);
+    final displayName = place['display_name'] ?? 'Selected Location';
+
+    setState(() {
+      destinationLocation = LatLng(lat, lon);
+      toController.text = displayName;
+      polygonPoints.clear();
+      isDrawingPolygon = false;
+      _selectedRideType = null;
+    });
+
+    getRoute(_pickupLocation, destinationLocation!).then((_) {
+      _calculateFare();
+      _mapController.move(destinationLocation!, 15);
+    });
+  }
+
+  // Quick search dialog for destination (extra option)
+  void _showSearchDialog() {
+    final TextEditingController searchController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Search Destination'),
+        content: TextField(
+          controller: searchController,
+          decoration: const InputDecoration(
+            hintText: 'Enter area, street, city...',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.search),
+          ),
+          onSubmitted: (value) {
+            Navigator.pop(context);
+            searchPlace(query: value);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final query = searchController.text.trim();
+              if (query.isNotEmpty) {
+                Navigator.pop(context);
+                searchPlace(query: query);
+              }
+            },
+            child: const Text('Search'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -------------------- ROUTE --------------------
   Future<void> getRoute(LatLng start, LatLng end) async {
-    // If start and end are the same, set distance to 0 and base fare
     if (start.latitude == end.latitude && start.longitude == end.longitude) {
       routePoints.clear();
       routePoints.add(start);
-      routePoints.add(end); // just two identical points
+      routePoints.add(end);
       setState(() {
         rideDistance = 0;
-        rideFare = 20; // base fare
+        rideFare = 20;
       });
       return;
     }
@@ -300,7 +533,7 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // ---- BOOK RIDE ----
+  // -------------------- BOOK RIDE --------------------
   void _bookRideAndNavigateToPayment() {
     if (destinationLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -308,16 +541,10 @@ class _MapPageState extends State<MapPage> {
       );
       return;
     }
-    // Even if routePoints is empty, we allow booking with zero distance
-    if (routePoints.isEmpty) {
-      // If no route but destination is set, we can still book with zero distance
-      // but we need to ensure we have at least some route points.
-      if (destinationLocation != null) {
-        // Create a dummy route
-        routePoints = [destinationLocation!, destinationLocation!];
-        rideDistance = 0;
-        rideFare = 20;
-      }
+    if (routePoints.isEmpty && destinationLocation != null) {
+      routePoints = [destinationLocation!, destinationLocation!];
+      rideDistance = 0;
+      rideFare = 20;
     }
     showModalBottomSheet(
       context: context,
@@ -438,7 +665,7 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // ---- LOCATION PICKER (Zomato style) ----
+  // -------------------- LOCATION PICKER (unchanged) --------------------
   void _showLocationPicker() {
     showModalBottomSheet(
       context: context,
@@ -451,21 +678,17 @@ class _MapPageState extends State<MapPage> {
         currentLocation: toController.text.isEmpty ? 'Select destination' : toController.text,
         onLocationSelected: (String location) {
           toController.text = location;
-          searchPlace(); // fetch coordinates and route
+          searchPlace(); // uses toController text
           Navigator.pop(context);
         },
         onCurrentLocationSelected: () {
-          // Set destination to current GPS location
           setState(() {
             destinationLocation = _currentLocation;
-            toController.text = fromController.text; // e.g., "Street, City"
-            // Clear previous route and get a new one (will be zero distance)
+            toController.text = fromController.text;
             routePoints.clear();
           });
-          // Get route (will be zero distance because start == end)
-          getRoute(_currentLocation, _currentLocation).then((_) {
+          getRoute(_pickupLocation, _currentLocation).then((_) {
             _calculateFare();
-            // Show confirmation
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text("Current location set as destination"),
@@ -475,21 +698,42 @@ class _MapPageState extends State<MapPage> {
           });
           Navigator.pop(context);
         },
+        onPickOnMap: () {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Tap anywhere on the map to set destination"),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        },
       ),
     );
   }
 
-  // ---- BUILD MARKERS ----
+  // -------------------- BUILD MARKERS --------------------
   List<Marker> _buildMarkers() {
     List<Marker> markers = [];
+    // Show pickup marker (green)
     markers.add(
       Marker(
-        point: _currentLocation,
+        point: _pickupLocation,
         width: 60,
         height: 60,
-        child: const Icon(Icons.location_pin, color: Colors.red, size: 45),
+        child: const Icon(Icons.location_pin, color: Colors.green, size: 45),
       ),
     );
+    // Show current GPS marker (red) – optional, but we can show both
+    if (_pickupLocation != _currentLocation) {
+      markers.add(
+        Marker(
+          point: _currentLocation,
+          width: 40,
+          height: 40,
+          child: const Icon(Icons.my_location, color: Colors.red, size: 30),
+        ),
+      );
+    }
     if (destinationLocation != null) {
       markers.add(
         Marker(
@@ -593,20 +837,39 @@ class _MapPageState extends State<MapPage> {
       ),
       body: Column(
         children: [
+          // -------------------- FROM FIELD (editable) --------------------
           Padding(
             padding: const EdgeInsets.all(10),
             child: TextField(
               controller: fromController,
-              readOnly: true,
+              readOnly: false, // now editable
               decoration: InputDecoration(
-                hintText: "Current Location",
-                prefixIcon: const Icon(Icons.my_location, color: Colors.green),
+                hintText: "Pickup Location",
+                prefixIcon: const Icon(Icons.location_pin, color: Colors.green),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Search pickup
+                    IconButton(
+                      icon: const Icon(Icons.search, color: Colors.blue),
+                      onPressed: searchPickup,
+                      tooltip: "Search pickup",
+                    ),
+                    // Reset to current GPS location
+                    IconButton(
+                      icon: const Icon(Icons.my_location, color: Colors.green),
+                      onPressed: _resetPickupToCurrent,
+                      tooltip: "Use current location",
+                    ),
+                  ],
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(15),
                 ),
               ),
             ),
           ),
+          // -------------------- MAP --------------------
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -683,7 +946,7 @@ class _MapPageState extends State<MapPage> {
                       ),
                     ),
                   ),
-                if (destinationLocation != null) // always show when destination is set
+                if (destinationLocation != null)
                   Positioned(
                     bottom: 10,
                     left: 10,
@@ -755,7 +1018,7 @@ class _MapPageState extends State<MapPage> {
               ],
             ),
           ),
-          // "Where to?" field – opens picker on tap
+          // -------------------- TO FIELD (destination) --------------------
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: TextField(
@@ -765,9 +1028,20 @@ class _MapPageState extends State<MapPage> {
               decoration: InputDecoration(
                 hintText: "Where to? (Tap to select)",
                 prefixIcon: const Icon(Icons.location_on, color: Colors.red),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: searchPlace, // fallback
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.search, color: Colors.blue),
+                      onPressed: _showSearchDialog,
+                      tooltip: "Search destination",
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_drop_down),
+                      onPressed: _showLocationPicker,
+                      tooltip: "More options",
+                    ),
+                  ],
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(15),
@@ -782,14 +1056,15 @@ class _MapPageState extends State<MapPage> {
   }
 }
 
-// ──────────────────────────────────────────────────────────────
-// LocationPicker – full‑screen modal bottom sheet
-// ──────────────────────────────────────────────────────────────
+// ============================================================
+// LOCATION PICKER (unchanged)
+// ============================================================
 class LocationPicker extends StatefulWidget {
   final List<String> savedLocations;
   final String currentLocation;
   final Function(String) onLocationSelected;
   final VoidCallback onCurrentLocationSelected;
+  final VoidCallback onPickOnMap;
 
   const LocationPicker({
     super.key,
@@ -797,6 +1072,7 @@ class LocationPicker extends StatefulWidget {
     required this.currentLocation,
     required this.onLocationSelected,
     required this.onCurrentLocationSelected,
+    required this.onPickOnMap,
   });
 
   @override
@@ -805,57 +1081,79 @@ class LocationPicker extends StatefulWidget {
 
 class _LocationPickerState extends State<LocationPicker> {
   final TextEditingController _searchController = TextEditingController();
-  List<String> _searchResults = [];
+  List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
+  Timer? _debounceTimer;
 
   Future<void> _searchLocation(String query) async {
-    if (query.isEmpty) {
-      setState(() => _searchResults = []);
-      return;
-    }
-    setState(() => _isSearching = true);
-    try {
-      List<Location> locations = await locationFromAddress(query);
-      if (locations.length > 5) locations = locations.sublist(0, 5);
-      List<String> results = [];
-      for (var loc in locations) {
-        try {
-          List<Placemark> placemarks = await placemarkFromCoordinates(
-            loc.latitude,
-            loc.longitude,
-          );
-          if (placemarks.isNotEmpty) {
-            Placemark place = placemarks.first;
-            List<String> parts = [
-              if (place.name != null && place.name!.isNotEmpty) place.name!,
-              if (place.street != null && place.street!.isNotEmpty) place.street!,
-              if (place.subLocality != null && place.subLocality!.isNotEmpty) place.subLocality!,
-              if (place.locality != null && place.locality!.isNotEmpty) place.locality!,
-              if (place.administrativeArea != null && place.administrativeArea!.isNotEmpty) place.administrativeArea!,
-            ];
-            String address = parts.join(', ');
-            if (address.isNotEmpty) {
-              results.add(address);
-            } else {
-              results.add('${loc.latitude}, ${loc.longitude}');
-            }
-          } else {
-            results.add('${loc.latitude}, ${loc.longitude}');
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 600), () async {
+      if (query.isEmpty) {
+        setState(() => _searchResults = []);
+        return;
+      }
+      setState(() => _isSearching = true);
+      try {
+        final url = Uri.parse(
+          "https://nominatim.openstreetmap.org/search?"
+              "q=${Uri.encodeComponent(query)}"
+              "&format=json"
+              "&limit=5"
+              "&countrycodes=in"
+              "&addressdetails=1",
+        );
+        final response = await http.get(url, headers: {"User-Agent": "EduRide"});
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as List;
+          if (data.isNotEmpty) {
+            setState(() {
+              _searchResults = data.map((e) => e as Map<String, dynamic>).toList();
+              _isSearching = false;
+            });
+            return;
           }
-        } catch (_) {
-          results.add('${loc.latitude}, ${loc.longitude}');
+        }
+        print("Nominatim returned no results, trying device geocoder...");
+        List<Location> locations = await locationFromAddress(query);
+        if (locations.isNotEmpty) {
+          List<Map<String, dynamic>> fallbackResults = [];
+          for (var loc in locations.take(5)) {
+            List<Placemark> placemarks = await placemarkFromCoordinates(
+              loc.latitude,
+              loc.longitude,
+            );
+            String displayName = placemarks.isNotEmpty
+                ? "${placemarks.first.street}, ${placemarks.first.locality}, ${placemarks.first.administrativeArea}"
+                : "${loc.latitude}, ${loc.longitude}";
+            fallbackResults.add({
+              "lat": loc.latitude.toString(),
+              "lon": loc.longitude.toString(),
+              "display_name": displayName,
+            });
+          }
+          setState(() {
+            _searchResults = fallbackResults;
+            _isSearching = false;
+          });
+        } else {
+          setState(() {
+            _searchResults = [];
+            _isSearching = false;
+          });
+        }
+      } catch (e) {
+        print("Search error: $e");
+        setState(() {
+          _searchResults = [];
+          _isSearching = false;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Search error: $e")),
+          );
         }
       }
-      setState(() {
-        _searchResults = results;
-        _isSearching = false;
-      });
-    } catch (e) {
-      setState(() {
-        _searchResults = [];
-        _isSearching = false;
-      });
-    }
+    });
   }
 
   @override
@@ -900,9 +1198,7 @@ class _LocationPickerState extends State<LocationPicker> {
               filled: true,
               fillColor: Colors.grey.shade100,
             ),
-            onChanged: (value) {
-              _searchLocation(value);
-            },
+            onChanged: _searchLocation,
           ),
           const SizedBox(height: 12),
           Expanded(
@@ -912,11 +1208,13 @@ class _LocationPickerState extends State<LocationPicker> {
                 ? ListView.builder(
               itemCount: _searchResults.length,
               itemBuilder: (context, index) {
+                final place = _searchResults[index];
+                final displayName = place['display_name'] ?? 'Unnamed';
                 return ListTile(
                   leading: const Icon(Icons.location_on, color: Colors.grey),
-                  title: Text(_searchResults[index]),
+                  title: Text(displayName),
                   onTap: () {
-                    widget.onLocationSelected(_searchResults[index]);
+                    widget.onLocationSelected(displayName);
                   },
                 );
               },
@@ -932,6 +1230,15 @@ class _LocationPickerState extends State<LocationPicker> {
                   subtitle: Text(widget.currentLocation),
                   onTap: () {
                     widget.onCurrentLocationSelected();
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.map, color: Colors.green),
+                  title: const Text('Pick on map'),
+                  subtitle: const Text('Tap anywhere on the map to set destination'),
+                  onTap: () {
+                    widget.onPickOnMap();
                   },
                 ),
                 const Divider(),
@@ -996,5 +1303,12 @@ class _LocationPickerState extends State<LocationPicker> {
         );
       },
     );
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    _searchController.dispose();
+    super.dispose();
   }
 }
