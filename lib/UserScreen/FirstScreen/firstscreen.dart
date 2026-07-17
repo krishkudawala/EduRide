@@ -1,4 +1,4 @@
-import 'package:eduride/Admin/amdinlogin/login.dart';
+import 'package:eduride/Driver/DriverLogin.dart';
 import 'package:eduride/UserScreen/LoginScreen/login.dart';
 import 'package:flutter/material.dart';
 
@@ -85,23 +85,23 @@ class _FirstscreenState extends State<Firstscreen> {
               color: Colors.white,
             ),
             onSelected: (value) {
-              if (value == "admin") {
+              if (value == "Driver") {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const Adminlogin(),
+                    builder: (context) => const Driverlogin(),
                   ),
                 );
               }
             },
             itemBuilder: (context) => [
               const PopupMenuItem<String>(
-                value: "admin",
+                value: "Driver",
                 child: Row(
                   children: [
                     Icon(Icons.admin_panel_settings),
                     SizedBox(width: 10),
-                    Text("Admin Login"),
+                    Text("Driver Login"),
                   ],
                 ),
               ),

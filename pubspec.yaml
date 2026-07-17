@@ -46,6 +46,7 @@ dependencies:
   flutter_map_cancellable_tile_provider: ^2.0.0
   fl_chart: ^0.63.0
   intl: ^0.18.1
+  google_maps_flutter: ^2.17.1
 
 
 
@@ -75,6 +76,8 @@ flutter:
   assets:
    - assects/logo/van5.jpg
    - assects/logo/homephoto.png
+   - assects/logo/driverpic.jpg
+   - assects/logo/driverimg.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

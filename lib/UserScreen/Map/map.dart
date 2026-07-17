@@ -1,5 +1,11 @@
+// Only the changed parts of map.dart are shown below for brevity.
+// But here is the complete updated map.dart file (replace yours with this):
+
+// ============= FULL map.dart (with new booking flow) =============
+
 import 'dart:async';
-import 'package:eduride/UserScreen/payment/payment_screen.dart';
+import 'package:eduride/UserScreen/DriverList/DriversList.dart';
+import 'package:eduride/UserScreen/RideRequestStatus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -8,6 +14,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:geocoding/geocoding.dart';
 import 'dart:math' as math;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -23,7 +31,7 @@ class _MapPageState extends State<MapPage> {
   double rideFare = 0;
 
   LatLng _currentLocation = const LatLng(30.3782, 76.7767);
-  LatLng _pickupLocation = const LatLng(30.3782, 76.7767); // NEW: user can change this
+  LatLng _pickupLocation = const LatLng(30.3782, 76.7767);
   bool _loading = true;
   StreamSubscription<Position>? _positionSubscription;
   LatLng? destinationLocation;
@@ -42,6 +50,8 @@ class _MapPageState extends State<MapPage> {
 
   final List<String> _savedLocations = ['Home', 'Work', 'School', 'Gym'];
 
+  Map<String, dynamic>? _selectedDriver;
+
   @override
   void initState() {
     super.initState();
@@ -50,7 +60,7 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // -------------------- LOCATION / PERMISSIONS --------------------
+  // -------------------- LOCATION / PERMISSIONS (unchanged) --------------------
   Future<void> getCurrentAddress() async {
     try {
       List<Placemark> place = await placemarkFromCoordinates(
@@ -100,7 +110,7 @@ class _MapPageState extends State<MapPage> {
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
     _currentLocation = LatLng(position.latitude, position.longitude);
-    _pickupLocation = _currentLocation; // set pickup to current
+    _pickupLocation = _currentLocation;
     await getCurrentAddress();
 
     if (mounted) {
@@ -118,18 +128,13 @@ class _MapPageState extends State<MapPage> {
       ),
     ).listen((Position position) {
       _currentLocation = LatLng(position.latitude, position.longitude);
-      // Only update pickup if user hasn't manually changed it? Let's update always but we can allow override.
-      // We'll update _pickupLocation only if the user hasn't manually changed it via search.
-      // For simplicity, we'll update _pickupLocation to current only if it's still equal to old current.
-      // Actually, we can have a flag, but I'll update but if user has manually set, they'd want to keep it.
-      // Safer: don't auto-update pickup. The user can reset manually.
       if (!mounted) return;
       setState(() {});
       _mapController.move(_currentLocation, _mapController.camera.zoom);
     });
   }
 
-  // -------------------- MAP TAP / DESTINATION --------------------
+  // -------------------- MAP TAP / DESTINATION (unchanged) --------------------
   void _onMapTap(TapPosition tapPosition, LatLng point) {
     setState(() {
       destinationLocation = point;
@@ -137,6 +142,7 @@ class _MapPageState extends State<MapPage> {
       polygonPoints.clear();
       isDrawingPolygon = false;
       _selectedRideType = null;
+      _selectedDriver = null;
       _getAddressFromCoordinates(point);
       _mapController.move(point, 15);
     });
@@ -149,7 +155,7 @@ class _MapPageState extends State<MapPage> {
         point.longitude,
       );
       toController.text = "${place.first.street}, ${place.first.locality}";
-      await getRoute(_pickupLocation, point); // use pickup as start
+      await getRoute(_pickupLocation, point);
       _calculateFare();
     } catch (e) {
       toController.text = "Selected Location";
@@ -158,7 +164,7 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // -------------------- FARE CALCULATION --------------------
+  // -------------------- FARE CALCULATION (unchanged) --------------------
   void _calculateFare() {
     if (routePoints.length < 2 && rideDistance == 0) {
       setState(() {
@@ -199,7 +205,7 @@ class _MapPageState extends State<MapPage> {
 
   double _degToRad(double deg) => deg * math.pi / 180;
 
-  // -------------------- POLYGON --------------------
+  // -------------------- POLYGON (unchanged) --------------------
   void _togglePolygonMode() {
     setState(() {
       isDrawingPolygon = !isDrawingPolygon;
@@ -225,7 +231,7 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // -------------------- SEARCH PICKUP (FROM) --------------------
+  // -------------------- SEARCH PICKUP (unchanged) --------------------
   Future<void> searchPickup() async {
     final query = fromController.text.trim();
     if (query.isEmpty) {
@@ -316,27 +322,22 @@ class _MapPageState extends State<MapPage> {
       fromController.text = displayName;
     });
 
-    // If destination already set, recalculate route and fare
     if (destinationLocation != null) {
       getRoute(_pickupLocation, destinationLocation!).then((_) {
         _calculateFare();
         _mapController.move(_pickupLocation, 15);
       });
     } else {
-      // just move map to pickup
       _mapController.move(_pickupLocation, 15);
     }
   }
 
-  // Reset pickup to current GPS location
   void _resetPickupToCurrent() {
     setState(() {
       _pickupLocation = _currentLocation;
-      fromController.text = "Current Location"; // we'll update address async
+      fromController.text = "Current Location";
     });
-    // update address
     getCurrentAddress();
-    // if destination set, recalc
     if (destinationLocation != null) {
       getRoute(_pickupLocation, destinationLocation!).then((_) {
         _calculateFare();
@@ -347,7 +348,7 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // -------------------- SEARCH DESTINATION (TO) --------------------
+  // -------------------- SEARCH DESTINATION (unchanged) --------------------
   Future<void> searchPlace({String? query}) async {
     final searchQuery = query ?? toController.text.trim();
     if (searchQuery.isEmpty) {
@@ -439,6 +440,7 @@ class _MapPageState extends State<MapPage> {
       polygonPoints.clear();
       isDrawingPolygon = false;
       _selectedRideType = null;
+      _selectedDriver = null;
     });
 
     getRoute(_pickupLocation, destinationLocation!).then((_) {
@@ -447,7 +449,6 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // Quick search dialog for destination (extra option)
   void _showSearchDialog() {
     final TextEditingController searchController = TextEditingController();
     showDialog(
@@ -486,7 +487,7 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  // -------------------- ROUTE --------------------
+  // -------------------- ROUTE (unchanged) --------------------
   Future<void> getRoute(LatLng start, LatLng end) async {
     if (start.latitude == end.latitude && start.longitude == end.longitude) {
       routePoints.clear();
@@ -533,8 +534,63 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // -------------------- BOOK RIDE --------------------
-  void _bookRideAndNavigateToPayment() {
+  // ==================== NEW FLOW: SEND PENDING REQUEST ====================
+
+  Future<void> _sendRideRequest(Map<String, dynamic> driver) async {
+    try {
+      User? user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please login first")),
+        );
+        return;
+      }
+
+      double finalFare = rideFare;
+      if (_selectedRideType == 'Premium') finalFare = rideFare * 1.5;
+      if (_selectedRideType == 'Shared') finalFare = rideFare * 0.7;
+
+      String uid = DateTime.now().microsecondsSinceEpoch.toString();
+
+      Map<String, dynamic> rideData = {
+        'uid': uid,
+        'fromAddress': fromController.text,
+        'toAddress': toController.text,
+        'pickup': GeoPoint(_pickupLocation.latitude, _pickupLocation.longitude),
+        'destination': GeoPoint(destinationLocation!.latitude, destinationLocation!.longitude),
+        'fare': finalFare,
+        'rideType': _selectedRideType ?? 'Standard',
+        'distance': rideDistance,
+        'driverName': driver['driverName'] ?? '',
+        'driverCar': driver['carModel'] ?? '',
+        'driverNumber': driver['carNumber'] ?? '',
+        'driverId': driver['driverId'],
+        'userId': user.uid,
+        'userEmail': user.email ?? '',
+        'status': 'pending',
+        'timestamp': FieldValue.serverTimestamp(),
+        if (polygonPoints.isNotEmpty)
+          'polygon': polygonPoints.map((p) => GeoPoint(p.latitude, p.longitude)).toList(),
+      };
+
+      await FirebaseFirestore.instance.collection('rides').doc(uid).set(rideData);
+
+      // Navigate to waiting screen
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => RideRequestStatusScreen(rideId: uid),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error sending request: $e")),
+      );
+    }
+  }
+
+  // ==================== BOOK RIDE (show ride types, then driver list) ====================
+  void _bookRideAndNavigateToDriverList() {
     if (destinationLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please select a destination first"), backgroundColor: Colors.orange),
@@ -600,7 +656,7 @@ class _MapPageState extends State<MapPage> {
                         child: ElevatedButton(
                           onPressed: _selectedRideType == null ? null : () {
                             Navigator.pop(context);
-                            _navigateToPayment();
+                            _navigateToDriverList();
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue,
@@ -611,7 +667,7 @@ class _MapPageState extends State<MapPage> {
                             disabledBackgroundColor: Colors.grey[300],
                           ),
                           child: const Text(
-                            "Book Ride",
+                            "Find Drivers",
                             style: TextStyle(color: Colors.white),
                           ),
                         ),
@@ -627,42 +683,32 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  void _navigateToPayment() {
+  Future<void> _navigateToDriverList() async {
     double finalFare = rideFare;
     if (_selectedRideType == 'Premium') finalFare = rideFare * 1.5;
     if (_selectedRideType == 'Shared') finalFare = rideFare * 0.7;
 
-    Navigator.push(
+    final driver = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
-        builder: (context) => PaymentPage(
-          amount: finalFare,
+        builder: (context) => Driverslist(
+          pickup: fromController.text,
+          destination: toController.text,
+          fare: finalFare,
           rideType: _selectedRideType ?? 'Standard',
-          fromLocation: fromController.text,
-          toLocation: toController.text,
           distance: rideDistance,
+          pickupLatLng: _pickupLocation,
+          destinationLatLng: destinationLocation!,
+          polygonPoints: polygonPoints,
         ),
       ),
-    ).then((result) {
-      if (result == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("🎉 Ride booked successfully!"),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
-        setState(() {
-          destinationLocation = null;
-          routePoints.clear();
-          toController.clear();
-          _selectedRideType = null;
-          rideFare = 0;
-          rideDistance = 0;
-        });
-        _mapController.move(_currentLocation, 16);
-      }
-    });
+    );
+
+    if (driver != null && driver['driverId'] != null) {
+      _sendRideRequest(driver);
+    } else {
+      print('No driver selected or missing driverId');
+    }
   }
 
   // -------------------- LOCATION PICKER (unchanged) --------------------
@@ -678,7 +724,7 @@ class _MapPageState extends State<MapPage> {
         currentLocation: toController.text.isEmpty ? 'Select destination' : toController.text,
         onLocationSelected: (String location) {
           toController.text = location;
-          searchPlace(); // uses toController text
+          searchPlace();
           Navigator.pop(context);
         },
         onCurrentLocationSelected: () {
@@ -711,10 +757,9 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  // -------------------- BUILD MARKERS --------------------
+  // -------------------- BUILD MARKERS (unchanged) --------------------
   List<Marker> _buildMarkers() {
     List<Marker> markers = [];
-    // Show pickup marker (green)
     markers.add(
       Marker(
         point: _pickupLocation,
@@ -723,7 +768,6 @@ class _MapPageState extends State<MapPage> {
         child: const Icon(Icons.location_pin, color: Colors.green, size: 45),
       ),
     );
-    // Show current GPS marker (red) – optional, but we can show both
     if (_pickupLocation != _currentLocation) {
       markers.add(
         Marker(
@@ -837,25 +881,23 @@ class _MapPageState extends State<MapPage> {
       ),
       body: Column(
         children: [
-          // -------------------- FROM FIELD (editable) --------------------
+          // FROM FIELD
           Padding(
             padding: const EdgeInsets.all(10),
             child: TextField(
               controller: fromController,
-              readOnly: false, // now editable
+              readOnly: false,
               decoration: InputDecoration(
                 hintText: "Pickup Location",
                 prefixIcon: const Icon(Icons.location_pin, color: Colors.green),
                 suffixIcon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Search pickup
                     IconButton(
                       icon: const Icon(Icons.search, color: Colors.blue),
                       onPressed: searchPickup,
                       tooltip: "Search pickup",
                     ),
-                    // Reset to current GPS location
                     IconButton(
                       icon: const Icon(Icons.my_location, color: Colors.green),
                       onPressed: _resetPickupToCurrent,
@@ -869,7 +911,7 @@ class _MapPageState extends State<MapPage> {
               ),
             ),
           ),
-          // -------------------- MAP --------------------
+          // MAP
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -993,7 +1035,7 @@ class _MapPageState extends State<MapPage> {
                                 ],
                               ),
                               ElevatedButton(
-                                onPressed: _bookRideAndNavigateToPayment,
+                                onPressed: _bookRideAndNavigateToDriverList,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.blue,
                                   padding: const EdgeInsets.symmetric(
@@ -1018,7 +1060,7 @@ class _MapPageState extends State<MapPage> {
               ],
             ),
           ),
-          // -------------------- TO FIELD (destination) --------------------
+          // TO FIELD
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: TextField(

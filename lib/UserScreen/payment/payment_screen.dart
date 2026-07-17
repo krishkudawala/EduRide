@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 class PaymentPage extends StatefulWidget {
-  // Parameters for ride details
   final double amount;
   final String rideType;
   final String fromLocation;
   final String toLocation;
   final double distance;
+  final String? rideId; // new
 
   const PaymentPage({
     super.key,
@@ -18,6 +18,7 @@ class PaymentPage extends StatefulWidget {
     required this.fromLocation,
     required this.toLocation,
     required this.distance,
+    this.rideId,
   });
 
   @override
@@ -60,7 +61,7 @@ class _PaymentPageState extends State<PaymentPage> {
     int amountInPaise = (widget.amount * 100).toInt();
 
     var options = {
-      'key': 'rzp_test_SsMf2KMfJMATzw', // Replace with your live key
+      'key': 'rzp_test_SsMf2KMfJMATzw',
       'amount': amountInPaise,
       'name': 'EduRide',
       'description': '${widget.rideType} Ride - ${widget.fromLocation} to ${widget.toLocation}',
@@ -134,13 +135,25 @@ class _PaymentPageState extends State<PaymentPage> {
         "createdAt": FieldValue.serverTimestamp(),
       });
 
+      // ✅ FIXED – use set with merge
       await FirebaseFirestore.instance
           .collection("users")
           .doc(user.uid)
-          .update({
+          .set({
         "totalPayments": FieldValue.increment(1),
         "lastPaymentDate": FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
+
+      if (widget.rideId != null) {
+        await FirebaseFirestore.instance
+            .collection('rides')
+            .doc(widget.rideId)
+            .update({
+          'status': 'confirmed',
+          'paymentId': response.paymentId,
+          'paymentStatus': 'Success',
+        });
+      }
 
       setState(() {
         _isProcessing = false;
@@ -165,7 +178,6 @@ class _PaymentPageState extends State<PaymentPage> {
       );
     }
   }
-
   void handlePaymentError(PaymentFailureResponse response) async {
     try {
       User? user = FirebaseAuth.instance.currentUser;
@@ -269,7 +281,7 @@ class _PaymentPageState extends State<PaymentPage> {
             onPressed: () {
               Navigator.pop(context);
               if (isSuccess) {
-                Navigator.pop(context, true); // Return success
+                Navigator.pop(context, true); // return success
               }
             },
             style: ElevatedButton.styleFrom(
@@ -473,7 +485,7 @@ class _PaymentPageState extends State<PaymentPage> {
                           Icons.lock,
                           color: Colors.white,
                         ),
-                        SizedBox(width: 10),
+                        const SizedBox(width: 10),
                         Text(
                           "Pay Now",
                           style: TextStyle(
